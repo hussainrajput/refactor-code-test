@@ -4,6 +4,7 @@ namespace DTApi\Repository;
 
 use DTApi\Events\SessionEnded;
 use DTApi\Helpers\SendSMSHelper;
+use DTApi\Helpers\PushHelper;
 use Event;
 use Carbon\Carbon;
 use Monolog\Logger;
@@ -26,6 +27,7 @@ use Monolog\Handler\StreamHandler;
 use Illuminate\Support\Facades\Log;
 use Monolog\Handler\FirePHPHandler;
 use Illuminate\Support\Facades\Auth;
+use DTApi\Models\Distance;
 
 /**
  * Class BookingRepository
@@ -92,11 +94,9 @@ class BookingRepository extends BaseRepository
     public function getUsersJobsHistory($user_id, Request $request)
     {
         $page = $request->get('page');
-        if (isset($page)) {
-            $pagenum = $page;
-        } else {
-            $pagenum = "1";
-        }
+
+        $pagenum = (isset($page) ? $page : "1");
+
         $cuser = User::find($user_id);
         $usertype = '';
         $emergencyJobs = array();
@@ -172,11 +172,8 @@ class BookingRepository extends BaseRepository
                     return $response;
                 }
             }
-            if (isset($data['customer_phone_type'])) {
-                $data['customer_phone_type'] = 'yes';
-            } else {
-                $data['customer_phone_type'] = 'no';
-            }
+
+            $data['customer_phone_type'] = (isset($data['customer_phone_type']) ? 'yes' : 'no');
 
             if (isset($data['customer_physical_type'])) {
                 $data['customer_physical_type'] = 'yes';
@@ -395,11 +392,7 @@ class BookingRepository extends BaseRepository
         $job->session_time = $interval;
 
         $user = $job->user()->get()->first();
-        if (!empty($job->user_email)) {
-            $email = $job->user_email;
-        } else {
-            $email = $user->email;
-        }
+        $email = (!empty($job->user_email) ? $job->user_email : $user->email);
         $name = $user->name;
         $subject = 'Information om avslutad tolkning för bokningsnummer # ' . $job->id;
         $session_explode = explode(':', $job->session_time);
@@ -610,63 +603,7 @@ class BookingRepository extends BaseRepository
      */
     public function sendPushNotificationToSpecificUsers($users, $job_id, $data, $msg_text, $is_need_delay)
     {
-
-        $logger = new Logger('push_logger');
-
-        $logger->pushHandler(new StreamHandler(storage_path('logs/push/laravel-' . date('Y-m-d') . '.log'), Logger::DEBUG));
-        $logger->pushHandler(new FirePHPHandler());
-        $logger->addInfo('Push send for job ' . $job_id, [$users, $data, $msg_text, $is_need_delay]);
-        if (env('APP_ENV') == 'prod') {
-            $onesignalAppID = config('app.prodOnesignalAppID');
-            $onesignalRestAuthKey = sprintf("Authorization: Basic %s", config('app.prodOnesignalApiKey'));
-        } else {
-            $onesignalAppID = config('app.devOnesignalAppID');
-            $onesignalRestAuthKey = sprintf("Authorization: Basic %s", config('app.devOnesignalApiKey'));
-        }
-
-        $user_tags = $this->getUserTagsStringFromArray($users);
-
-        $data['job_id'] = $job_id;
-        $ios_sound = 'default';
-        $android_sound = 'default';
-
-        if ($data['notification_type'] == 'suitable_job') {
-            if ($data['immediate'] == 'no') {
-                $android_sound = 'normal_booking';
-                $ios_sound = 'normal_booking.mp3';
-            } else {
-                $android_sound = 'emergency_booking';
-                $ios_sound = 'emergency_booking.mp3';
-            }
-        }
-
-        $fields = array(
-            'app_id'         => $onesignalAppID,
-            'tags'           => json_decode($user_tags),
-            'data'           => $data,
-            'title'          => array('en' => 'DigitalTolk'),
-            'contents'       => $msg_text,
-            'ios_badgeType'  => 'Increase',
-            'ios_badgeCount' => 1,
-            'android_sound'  => $android_sound,
-            'ios_sound'      => $ios_sound
-        );
-        if ($is_need_delay) {
-            $next_business_time = DateTimeHelper::getNextBusinessTimeString();
-            $fields['send_after'] = $next_business_time;
-        }
-        $fields = json_encode($fields);
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, "https://onesignal.com/api/v1/notifications");
-        curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json', $onesignalRestAuthKey));
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
-        curl_setopt($ch, CURLOPT_HEADER, FALSE);
-        curl_setopt($ch, CURLOPT_POST, TRUE);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $fields);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
-        $response = curl_exec($ch);
-        $logger->addInfo('Push send for job ' . $job_id . ' curl answer', [$response]);
-        curl_close($ch);
+        PushHelper::sendPushNotificationToSpecificUsers($users, $job_id, $data, $msg_text, $is_need_delay);
     }
 
     /**
@@ -849,11 +786,7 @@ class BookingRepository extends BaseRepository
         $old_status = $job->status;
         $job->status = $data['status'];
         $user = $job->user()->first();
-        if (!empty($job->user_email)) {
-            $email = $job->user_email;
-        } else {
-            $email = $user->email;
-        }
+        $email = (!empty($job->user_email) ? $job->user_email : $user->email);
         $name = $user->name;
         $dataEmail = [
             'user' => $user,
@@ -921,11 +854,7 @@ class BookingRepository extends BaseRepository
             $job->end_at = date('Y-m-d H:i:s');
             $job->session_time = $interval;
             $session_time = $diff[0] . ' tim ' . $diff[1] . ' min';
-            if (!empty($job->user_email)) {
-                $email = $job->user_email;
-            } else {
-                $email = $user->email;
-            }
+            $email = (!empty($job->user_email) ? $job->user_email : $user->email);
             $name = $user->name;
             $dataEmail = [
                 'user'         => $user,
@@ -970,11 +899,7 @@ class BookingRepository extends BaseRepository
         if ($data['admin_comments'] == '' && $data['status'] == 'timedout') return false;
         $job->admin_comments = $data['admin_comments'];
         $user = $job->user()->first();
-        if (!empty($job->user_email)) {
-            $email = $job->user_email;
-        } else {
-            $email = $user->email;
-        }
+        $email = (!empty($job->user_email) ? $job->user_email : $user->email);
         $name = $user->name;
         $dataEmail = [
             'user' => $user,
@@ -1069,11 +994,7 @@ class BookingRepository extends BaseRepository
             if (in_array($data['status'], ['withdrawbefore24', 'withdrawafter24'])) {
                 $user = $job->user()->first();
 
-                if (!empty($job->user_email)) {
-                    $email = $job->user_email;
-                } else {
-                    $email = $user->email;
-                }
+                $email = (!empty($job->user_email) ? $job->user_email : $user->email);
                 $name = $user->name;
                 $dataEmail = [
                     'user' => $user,
@@ -1171,11 +1092,7 @@ class BookingRepository extends BaseRepository
     public function sendChangedTranslatorNotification($job, $current_translator, $new_translator)
     {
         $user = $job->user()->first();
-        if (!empty($job->user_email)) {
-            $email = $job->user_email;
-        } else {
-            $email = $user->email;
-        }
+        $email = (!empty($job->user_email) ? $job->user_email : $user->email);
         $name = $user->name;
         $subject = 'Meddelande om tilldelning av tolkuppdrag för uppdrag # ' . $job->id . ')';
         $data = [
@@ -1208,11 +1125,7 @@ class BookingRepository extends BaseRepository
     public function sendChangedDateNotification($job, $old_time)
     {
         $user = $job->user()->first();
-        if (!empty($job->user_email)) {
-            $email = $job->user_email;
-        } else {
-            $email = $user->email;
-        }
+        $email = (!empty($job->user_email) ? $job->user_email : $user->email);
         $name = $user->name;
         $subject = 'Meddelande om ändring av tolkbokning för uppdrag # ' . $job->id . '';
         $data = [
@@ -1239,11 +1152,7 @@ class BookingRepository extends BaseRepository
     public function sendChangedLangNotification($job, $old_lang)
     {
         $user = $job->user()->first();
-        if (!empty($job->user_email)) {
-            $email = $job->user_email;
-        } else {
-            $email = $user->email;
-        }
+        $email = (!empty($job->user_email) ? $job->user_email : $user->email);
         $name = $user->name;
         $subject = 'Meddelande om ändring av tolkbokning för uppdrag # ' . $job->id . '';
         $data = [
@@ -1612,11 +1521,7 @@ class BookingRepository extends BaseRepository
         $job->session_time = $interval;
 
         $user = $job->user()->get()->first();
-        if (!empty($job->user_email)) {
-            $email = $job->user_email;
-        } else {
-            $email = $user->email;
-        }
+        $email = (!empty($job->user_email) ? $job->user_email : $user->email);
         $name = $user->name;
         $subject = 'Information om avslutad tolkning för bokningsnummer # ' . $job->id;
         $session_explode = explode(':', $job->session_time);
@@ -1801,10 +1706,7 @@ class BookingRepository extends BaseRepository
             
             $allJobs->orderBy('created_at', 'desc');
             $allJobs->with('user', 'language', 'feedback.user', 'translatorJobRel.user', 'distance');
-            if ($limit == 'all')
-                $allJobs = $allJobs->get();
-            else
-                $allJobs = $allJobs->paginate(15);
+            $allJobs = ($limit == 'all' ? $allJobs->get() : $allJobs->paginate(15));
 
         } else {
 
@@ -1866,10 +1768,7 @@ class BookingRepository extends BaseRepository
 
             $allJobs->orderBy('created_at', 'desc');
             $allJobs->with('user', 'language', 'feedback.user', 'translatorJobRel.user', 'distance');
-            if ($limit == 'all')
-                $allJobs = $allJobs->get();
-            else
-                $allJobs = $allJobs->paginate(15);
+            $allJobs = ($limit == 'all' ? $allJobs->get() : $allJobs->paginate(15));
 
         }
         return $allJobs;
@@ -2088,25 +1987,19 @@ class BookingRepository extends BaseRepository
 
     public function ignoreExpiring($id)
     {
-        $job = Job::find($id);
-        $job->ignore = 1;
-        $job->save();
+        Job::where('id',$id)->update(['ignore'=>'1']);
         return ['success', 'Changes saved'];
     }
 
     public function ignoreExpired($id)
     {
-        $job = Job::find($id);
-        $job->ignore_expired = 1;
-        $job->save();
+        Job::where('id',$id)->update(['ignore_expired'=>'1']);
         return ['success', 'Changes saved'];
     }
 
     public function ignoreThrottle($id)
     {
-        $throttle = Throttles::find($id);
-        $throttle->ignore = 1;
-        $throttle->save();
+        Throttles::where('id',$id)->update(['ignore'=>'1']);
         return ['success', 'Changes saved'];
     }
 
@@ -2179,6 +2072,66 @@ class BookingRepository extends BaseRepository
         $minutes = ($time % 60);
         
         return sprintf($format, $hours, $minutes);
+    }
+
+    public function distanceFeed($data)
+    {
+        if (isset($data['distance']) && $data['distance'] != "") {
+            $distance = $data['distance'];
+        } else {
+            $distance = "";
+        }
+        if (isset($data['time']) && $data['time'] != "") {
+            $time = $data['time'];
+        } else {
+            $time = "";
+        }
+        if (isset($data['jobid']) && $data['jobid'] != "") {
+            $jobid = $data['jobid'];
+        }
+
+        if (isset($data['session_time']) && $data['session_time'] != "") {
+            $session = $data['session_time'];
+        } else {
+            $session = "";
+        }
+
+        if ($data['flagged'] == 'true') {
+            if($data['admincomment'] == '') return "Please, add comment";
+            $flagged = 'yes';
+        } else {
+            $flagged = 'no';
+        }
+        
+        if ($data['manually_handled'] == 'true') {
+            $manually_handled = 'yes';
+        } else {
+            $manually_handled = 'no';
+        }
+
+        if ($data['by_admin'] == 'true') {
+            $by_admin = 'yes';
+        } else {
+            $by_admin = 'no';
+        }
+
+        if (isset($data['admincomment']) && $data['admincomment'] != "") {
+            $admincomment = $data['admincomment'];
+        } else {
+            $admincomment = "";
+        }
+        if ($time || $distance) {
+
+            $affectedRows = Distance::where('job_id', '=', $jobid)->update(array('distance' => $distance, 'time' => $time));
+        }
+
+        if ($admincomment || $session || $flagged || $manually_handled || $by_admin) {
+
+            $affectedRows1 = Job::where('id', '=', $jobid)->update(array('admin_comments' => $admincomment, 'flagged' => $flagged, 'session_time' => $session, 'manually_handled' => $manually_handled, 'by_admin' => $by_admin));
+
+        }
+
+        return ['success','Record updated!'];
     }
 
 }
